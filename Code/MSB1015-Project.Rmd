@@ -19,7 +19,7 @@ library(GGally)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd()
 
-data <- read_csv("METABRIC_RNA_Mutation.csv")
+# data <- read_csv("METABRIC_RNA_Mutation.csv")
 ```
 
 
@@ -172,30 +172,30 @@ ggplot(scores_df, aes(x = OutlierScore)) +
 mean_score <- mean(data_filtered$pred, na.rm = TRUE)
 sd_score <- sd(data_filtered$pred, na.rm = TRUE)
 
-# Define thresholds for filtering
-lower_threshold <- mean_score * 0.95 # might do 5%
-upper_threshold <- mean_score * 1.05 # only low visualise with PCA
+# Store the original number of rows before filtering
+original_count <- nrow(data_filtered)
 
-# Filter out rows where the score is outside of 3 standard deviations from the mean
+lower_threshold <- mean_score - 2*sd_score
+
+# Filter out rows where the score is outside of 2 standard deviations from the mean
 data_filtered <- data_filtered %>%
   filter(pred >= lower_threshold) %>%
-  filter(pred <= upper_threshold) %>%
-  select(-pred)
+  select(-pred)  # Remove the 'pred' column
 
-# Check for inconsistencies
-result <- lapply(data_filtered, function(i) {
-  if (is.factor(i)) {
-    unique(i)
-  }
-})
-result <- Filter(Negate(is.null), result)
-# Print the result
-print(result)
+# Store the number of rows after filtering
+filtered_count <- nrow(data_filtered)
+
+# Calculate the number of eliminated rows
+eliminated_count <- original_count - filtered_count
+
+# Print the number of eliminated variables
+cat("Number of eliminated variables:", eliminated_count, "\n")
 ```
 
 
 # 2. The random forest
-```{r random forest, echo=FALSE}
+```{r data tranformation for random forest, echo=FALSE}
+
 # Load required packages
 library(randomForest)
 library(caTools)
@@ -206,7 +206,9 @@ library(pbapply)
 library(ROCR)
 library(PRROC)
 library(pROC)
+library(gridExtra)
 
+# Create a function to create the prognosis variable
 categorise_prognosis <- function(months) {
   case_when(
     months <= 60 + (60 * 0.25) ~ "will_die_within_5_years",
@@ -220,35 +222,62 @@ categorical_data <- data_filtered %>%
   filter(death_from_cancer != "Died of Other Causes") %>%
   filter(overall_survival == 0) %>%
   mutate(
-    prognosis = categorise_prognosis(overall_survival_months)
+    prognosis = as.factor(categorise_prognosis(overall_survival_months))
   ) %>%
-  select(-death_from_cancer, -overall_survival, -overall_survival_months)
+  select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
+  as.data.frame()
+
+source("~/University/MSB/MSB1015/funPCA.R") # Change the directory as needed
+
+# Call the function and plot
+pca_plots_categorical <- pca_proximity_plot(categorical_data, "prognosis")
+grid.arrange(grobs = pca_plots_categorical, ncol = 2)
 
 genetic_data <- data_filtered %>%
   select(brca1:stmn2_mut, overall_survival_months, death_from_cancer, overall_survival) %>%
   filter(death_from_cancer != "Died of Other Causes") %>%
   filter(overall_survival == 0) %>%
   mutate(
-    prognosis = categorise_prognosis(overall_survival_months)
+    prognosis = as.factor(categorise_prognosis(overall_survival_months))
   ) %>%
-  select(-death_from_cancer, -overall_survival, -overall_survival_months)
+  select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
+  as.data.frame()
 
-full_data <- data_filtered %>%
+# Call the function and plot
+pca_plots_genetic <- pca_proximity_plot(genetic_data, "prognosis")
+grid.arrange(grobs = pca_plots_genetic, ncol = 2)
+
+complete_data <- data_filtered %>%
   filter(death_from_cancer != "Died of Other Causes") %>%
   filter(overall_survival == 0) %>%
   mutate(
-    prognosis = categorise_prognosis(overall_survival_months)
+    prognosis = as.factor(categorise_prognosis(overall_survival_months))
   ) %>%
-  select(-death_from_cancer, -overall_survival, -overall_survival_months)
+  select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
+  as.data.frame()
 
-# Split the data into training and testing sets
+# Call the function and plot
+pca_plots_complete <- pca_proximity_plot(complete_data, "prognosis")
+grid.arrange(grobs = pca_plots_complete, ncol = 2)
+```
+
+
+# 2.1 The random forest
+```{r random forest, echo=FALSE}
+
+# Set the seed for reproducibility of random results using the L'Ecuyer-CMRG method
 set.seed(111, "L'Ecuyer-CMRG")
 
+# Create a partition to split the data into training and testing sets
+# The target variable for stratification is 'prognosis', with 70% of the data for training
 trainIndex <- createDataPartition(categorical_data$prognosis, p = .7, 
-                                  list = FALSE, 
-                                  times = 1)
+                                  list = FALSE,  # Return indices as a matrix
+                                  times = 1)     # Perform the partitioning once
 
-train <- categorical_data[ trainIndex,]
+# Subset the original data to create the training set using the indices from trainIndex
+train <- categorical_data[trainIndex,]
+
+# Subset the original data to create the testing set using the remaining indices
 test  <- categorical_data[-trainIndex,]
 
 # Ensure "prognosis" is a factor
@@ -269,11 +298,14 @@ x_train <- train_sample$x
 inner_control <- trainControl(method = "cv", number = 5, search = "grid", summaryFunction = twoClassSummary, classProbs = TRUE)
 
 tuneGrid <- expand.grid(mtry = 2:8)
-ntrees <- c(1000, 2000) 
-nodesize <- c(1, 5)
 
-# List for the combinations
-list <- 4
+# The model with the highest AUC that I found was with 2000 trees and node size of 1. 
+# When creating the model these values can be changed.
+ntrees <- c(2000) 
+nodesize <- c(1)
+
+# List for the combinations: should have all the possible combinations between ntrees and nodesize.
+list <- 1
 
 # Define the grid for hyperparameter tuning
 params <- expand.grid(ntrees = ntrees,
@@ -307,12 +339,16 @@ for(i in 1:nrow(params)) {
   names(store_models)[i] <- paste0("ntree_", ntree, "_nodesize_", nodesize)
 }
 
+```
 
+
+# 2.2 Finding the best model
+```{r best model, echo=FALSE}
 # Initialize an empty list to store the metrics
 metrics_list <- list()
 
 # Loop over the indices in the provided list
-for (i in list) {
+for (i in seq_along(store_models)) {
   # Apply the metrics function to each model in store_models
   metrics_list[[names(store_models)[i]]] <- metrics(store_models[[i]])
 }
@@ -332,17 +368,19 @@ best_model <- store_models[[best_model_index]]
 
 # Get an overview of the best model
 summary(best_model)
+```
 
+
+
+# 2.3 ROC and PR curves on the best model
+```{r accuracy and plotting, echo=FALSE}
 # Calculate accuracy on the train set for the best model
-# model_predict <- best_model$final_fit$finalModel$predicted
-# pred_table_training <- table(model_predict, y_train)
-# confusionMatrix(pred_table_training)
 pred_table_training <- table(best_model$output$predy, best_model$output$testy)
 train_confusion <- confusionMatrix(pred_table_training)
 train_confusion
 
 # Call the plotting function for the confusion matrix
-source("~/University/MSB/MSB1015/confusionPlot.R")
+source("~/University/MSB/MSB1015/confusionPlot.R") # Change the directory as needed
 confusionPlot(train_confusion, title = "Confusion Matrix (Training Set)")
 
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
@@ -374,6 +412,9 @@ importance <- as.data.frame(best_model$final_fit$finalModel$importance) %>%
          will_die_within_5_years = will_die_within_5_years * 10,
          column = row.names(best_model$final_fit$finalModel$importance))
 
+importance_sorted <- importance[order(importance$will_die_within_10_years, decreasing = TRUE), ]
+head(importance_sorted)
+
 # Plot the importance of the variables
 ggplot(importance, aes(x = reorder(column, will_die_within_10_years))) +
   geom_bar(aes(y = will_die_within_10_years, fill = "Will die within 10 years"), 
@@ -393,14 +434,16 @@ err_rate <- as.data.frame(best_model$final_fit$finalModel$err.rate) %>%
 
 # Plot OOB
 ggplot(err_rate, aes(x = ntrees, y = OOB)) +
-  geom_line(color = "skyblue1", size = 1) +
+  geom_line(color = "skyblue1", linewidth = 1) +
   labs(x = "Number of Trees", y = "OBB Error", title = "Out Of Bags (OOB) error") +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+```
 
-###############
-### TESTING ###
-###############
+
+
+# 2.4 Testing
+```{r testing, echo=FALSE}
 
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
 pred_probs <- predict(best_model, newdata = test, type = "prob")
@@ -460,7 +503,4 @@ test_confusion <- confusionMatrix(pred_table)
 test_confusion
 
 confusionPlot(test_confusion, title = "Confusion Matrix (Testing Set)")
-
 ```
-
-

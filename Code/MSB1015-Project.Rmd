@@ -8,13 +8,15 @@ output: html_document
 # 0. Setup
 ```{r setup, include=FALSE}
 # List of required packages
-required_packages <- c("rstudioapi", "readr", "dplyr", "ggplot2", "tidyr", 
-                       "stringr", "GGally", "mice", "isotree", "randomForest", 
-                       "caTools", "caret", "nestedcv", "mlbench", "pbapply", 
-                       "ROCR", "PRROC", "pROC", "gridExtra")
+required_packages <- c(
+  "rstudioapi", "readr", "dplyr", "ggplot2", "tidyr",
+  "stringr", "GGally", "mice", "isotree", "randomForest",
+  "caTools", "caret", "nestedcv", "mlbench", "pbapply",
+  "ROCR", "PRROC", "pROC", "gridExtra"
+)
 
 # Check and install missing packages
-new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
 if (length(new_packages)) {
   install.packages(new_packages)
 }
@@ -27,11 +29,23 @@ library(ggplot2)
 library(tidyr)
 library(stringr)
 library(GGally)
+library(mice)
+library(randomForest)
+library(caTools)
+library(caret)
+library(nestedcv)
+library(mlbench)
+library(pbapply)
+library(ROCR)
+library(PRROC)
+library(pROC)
+library(gridExtra)
 
-
+# Set the working directory to the one where this code is
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd()
 
+# Load the data
 data <- read_csv("METABRIC_RNA_Mutation.csv")
 ```
 
@@ -43,34 +57,34 @@ any(duplicated(data))
 
 # Check for missing values
 missing_counts <- data %>%
-  summarise(across(everything(), ~ sum(is.na(.)))) %>%
-  pivot_longer(everything(), names_to = "column", values_to = "missing_count") %>%
-  filter(missing_count > 10)
+  summarise(across(everything(), ~ sum(is.na(.)))) %>% # Summarise missing values per column
+  pivot_longer(everything(), names_to = "column", values_to = "missing_count") %>% # Reshape into long format
+  filter(missing_count > 10) # Filter columns with more than 10 missing values
 
 # Plot where those missing values were found
 ggplot(missing_counts, aes(x = reorder(column, missing_count), y = missing_count)) +
-  geom_bar(stat = "identity", fill = "skyblue1") +
+  geom_bar(stat = "identity", fill = "royalblue") +
   coord_flip() +
   labs(x = "Column", y = "Missing Count", title = "Columns with More Than 10 Missing Values")
 
+# Convert specific columns to factors
 data$tumor_stage <- as.factor(data$tumor_stage)
-
 data$neoplasm_histologic_grade <- as.factor(data$neoplasm_histologic_grade)
 
 # Apply the modifications
 data_filled <- data %>%
-  # 1. Replace missing values with "Unknown" for all categorical columns
+  # 1. Replace missing values with "Unknown" for specific categorical columns (not suitable for imputation)
   mutate(
     oncotree_code = replace_na(oncotree_code, "Unknown"),
     cancer_type_detailed = replace_na(cancer_type_detailed, "Unknown")
   ) %>%
-  # 3. Replace missing values with the median for "tumor_size"
+  # 2. Replace missing values in "tumor_size" with the median value of the column
   mutate(tumor_size = ifelse(is.na(tumor_size), median(tumor_size, na.rm = TRUE), tumor_size)) %>%
-  # 4. Replace missing values with 0 for columns ending with "_mut"
+  # 3. Replace missing values with 0 for all columns that end with "_mut"
   mutate(across(ends_with("_mut"), ~ replace_na(., 0))) %>%
-  # 5. Convert the columns ending with "_mut" to a logical vector
+  # 4. Convert values in columns ending with "_mut" to a binary vector (values not equal to "0" are converted to 1)
   mutate(across(ends_with("_mut"), ~ ifelse(. != "0", 1, 0))) %>%
-  # 6.
+  # 5. Calculate the "mutation_count" by summing the binary values (1s) in columns that end with "_mut" for each row
   rowwise() %>%
   mutate(mutation_count = sum(across(ends_with("_mut")) == 1))
 
@@ -82,7 +96,7 @@ pca_gx <- data_filled %>%
   select(brca1:ugt2b7)
 
 # Perform PCA to check the columns with the highest amount of missing values
-pca <- prcomp(pca_gx)
+pca <- prcomp(pca_gx, center = TRUE, scale. = TRUE)
 
 # Convert PCA results to data frame
 pca_data <- as.data.frame(pca$x[, 1:3])
@@ -101,22 +115,12 @@ ggpairs(pca_data,
 
 # 0.2 Imputation (this step will take some time)
 ```{r impute, echo=FALSE}
-# Load necessary libraries
-library(mice)
-
-# Get rid of unwanted characters from the column names
+# Get rid of unwanted characters from the column names (the sign '+' from one of the variables)
 colnames(data_filled) <- make.names(colnames(data_filled), unique = TRUE)
 
 # Convert all character variables to factors
 data_filled <- data_filled %>%
   mutate(across(where(is.character), as.factor))
-
-# Identify categorical variables
-fac_vars <- names(data_filled)[sapply(data_filled, is.factor)]
-
-# Specify methods for all variables, setting CART for categorical variables
-meth <- make.method(data_filled)
-meth[fac_vars] <- "cart" # Use CART for all categorical variables
 
 set.seed(111)
 
@@ -126,8 +130,10 @@ imputation_result <- mice(data_filled,
   m = 5 # 5 is the commonly chosen value for the number of multiple imputations to perform
 )
 
+# Collect the results
 imputed_data <- complete(imputation_result)
 
+# Save the imputed data in the working directory
 write.csv(imputed_data, file = "imputed_data.csv", row.names = FALSE)
 ```
 
@@ -211,37 +217,26 @@ cat("Number of eliminated variables:", eliminated_count, "\n")
 
 # 2. The random forest
 ```{r data tranformation for random forest, echo=FALSE}
-# Load required packages
-library(randomForest)
-library(caTools)
-library(caret)
-library(nestedcv)
-library(mlbench)
-library(pbapply)
-library(ROCR)
-library(PRROC)
-library(pROC)
-library(gridExtra)
-
-# Create a function to form the prognosis variable
+# Create a function to form the prognosis variable based on overall survival months
 categorise_prognosis <- function(months) {
   case_when(
     months <= 60 + (60 * 0.25) ~ "will_die_within_5_years",
-    months > 60 + (60 * 0.25) ~ "will_die_within_10_years",
+    months > 60 + (60 * 0.25) ~ "will_die_within_10_years"
   )
 }
 
 # Create the categorical dataframe
 categorical_data <- data_filtered %>%
   select(age_at_diagnosis:death_from_cancer) %>% # Extract the categorical variables
-  filter(death_from_cancer != "Died of Other Causes") %>%
-  filter(overall_survival == 0) %>%
+  filter(death_from_cancer != "Died of Other Causes") %>% # Remove records for non-cancer deaths
+  filter(overall_survival == 0) %>% # Keep only the rows where overall survival is 0
   mutate(
-    prognosis = as.factor(categorise_prognosis(overall_survival_months)) # Call the function to create 'prognosis'
+    prognosis = as.factor(categorise_prognosis(overall_survival_months)) # Apply function to create 'prognosis'
   ) %>%
-  select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
-  as.data.frame()
+  select(-death_from_cancer, -overall_survival, -overall_survival_months) %>% # Drop unnecessary columns
+  as.data.frame() # Convert to a dataframe
 
+# Load the function for PCA
 source("~/University/MSB/MSB1015/funPCA.R") # Change the directory as needed
 
 # Call the function for the unsupervised random forest PCA
@@ -281,6 +276,7 @@ grid.arrange(grobs = pca_plots_complete, ncol = 2)
 
 # 2.1 The random forest function
 ```{r random forest function, echo=FALSE}
+# Create the function to perform random forest classification
 random_forest <- function(data, ntree, nrun) {
   # Set the seed for reproducibility using the L'Ecuyer-CMRG method
   set.seed(111, "L'Ecuyer-CMRG")
@@ -470,10 +466,11 @@ get_final_metrics <- function(results_data) {
 
   # Compute the average across the rows
   t_final_metrics_df <- t_final_metrics_df %>%
-    rowwise() %>%
-    mutate(average = mean(c_across(everything()), na.rm = TRUE)) %>%
+    rowwise() %>% # Perform row-wise operations
+    mutate(average = mean(c_across(everything()), na.rm = TRUE)) %>% # Calculate row-wise average
     ungroup() %>%
-    mutate(Metric = c("AUC", "Balanced Accuracy"))
+    mutate(Metric = c("AUC", "Balanced Accuracy")) # Add a Metric column
+
 
   # Return the final metrics dataframe
   return(t_final_metrics_df)
@@ -525,30 +522,30 @@ best_class_data <- get(best_class_name)
 # 4. ROC and PR curves on the best model from the best class
 ```{r accuracy and plotting, echo=FALSE}
 # Calculate accuracy on the train set for the best model
-pred_table_training <- table(best_class_data$best_model_overall$output$predy, best_class_data$best_model_overall$output$testy)
-train_confusion <- confusionMatrix(pred_table_training)
+pred_table_training <- table(best_class_data$best_model_overall$output$predy, best_class_data$best_model_overall$output$testy) # Create prediction table
+train_confusion <- confusionMatrix(pred_table_training) # Compute confusion matrix
 train_confusion
 
 # Call the plotting function for the confusion matrix
-source("~/University/MSB/MSB1015/confusionPlot.R") # Change the directory as needed
-confusionPlot(train_confusion, title = "Confusion Matrix (Training Set)")
+source("~/University/MSB/MSB1015/confusionPlot.R") # Load external plot function (update directory if needed)
+confusionPlot(train_confusion, title = "Confusion Matrix (Training Set)") # Plot confusion matrix
 
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
-pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$train, type = "prob")
-positive_class_probs <- pred_probs[, "will_die_within_10_years"]
+pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$train, type = "prob") # Predict probabilities
+positive_class_probs <- pred_probs[, "will_die_within_10_years"] # Extract probabilities for "will_die_within_10_years"
 
-# Get the precision recall values
-best_class_data$best_model_overall$prc <- prc(best_class_data$best_model_overall)
+# Get the precision-recall values
+best_class_data$best_model_overall$prc <- prc(best_class_data$best_model_overall) # Calculate precision-recall
 
 # Save precision and recall plots as PNG
 png("precision_recall_plots_training.png", width = 1600, height = 800)
 
 # Plot precision and recall
-op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1)
-plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC Training", las = 1)
-legend("bottomright", legend = paste0("AUC = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 3)), bty = "n")
-plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-recall Training")
-legend("topright", legend = paste0("AUC = ", round(best_class_data$best_model_overall$prc$auc, 3)), bty = "n")
+op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1) # Set up the plotting layout
+plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC Training", las = 1) # Plot ROC curve
+legend("bottomright", legend = paste0("AUC = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 3)), bty = "n") # Add AUC legend
+plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-recall Training") # Plot Precision-Recall curve
+legend("topright", legend = paste0("AUC = ", round(best_class_data$best_model_overall$prc$auc, 3)), bty = "n") # Add AUC legend for PRC
 
 # Reset plotting parameters
 par(op)
@@ -557,14 +554,14 @@ par(op)
 dev.off()
 
 # Extract the importance of the variables for the best model
-importance <- as.data.frame(best_class_data$best_model_overall$final_fit$finalModel$importance) %>%
+importance <- as.data.frame(best_class_data$best_model_overall$final_fit$finalModel$importance) %>% # Get variable importance
   mutate(
-    will_die_within_10_years = will_die_within_10_years * 10,
+    will_die_within_10_years = will_die_within_10_years * 10, # Scale the importance scores
     will_die_within_5_years = will_die_within_5_years * 10,
-    column = row.names(best_class_data$best_model_overall$final_fit$finalModel$importance)
+    column = row.names(best_class_data$best_model_overall$final_fit$finalModel$importance) # Extract feature names
   )
 
-importance_sorted <- importance[order(importance$will_die_within_10_years, decreasing = TRUE), ]
+importance_sorted <- importance[order(importance$will_die_within_10_years, decreasing = TRUE), ] # Sort by importance
 head(importance_sorted)
 
 # Plot the importance of the variables
@@ -582,18 +579,18 @@ ggplot(importance, aes(x = reorder(column, will_die_within_10_years))) +
   coord_flip() +
   labs(x = "Feature", y = "Importance Score", title = "Variable Importance", fill = "Prognosis") +
   theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) # Create variable importance plot
 
 # Extract the error rates (OOB)
-err_rate <- as.data.frame(best_class_data$best_model_overall$final_fit$finalModel$err.rate) %>%
-  mutate(ntrees = 1:nrow(best_class_data$best_model_overall$final_fit$finalModel$err.rate))
+err_rate <- as.data.frame(best_class_data$best_model_overall$final_fit$finalModel$err.rate) %>% # Extract error rates
+  mutate(ntrees = 1:nrow(best_class_data$best_model_overall$final_fit$finalModel$err.rate)) # Add number of trees
 
-# Plot OOB
+# Plot OOB error
 ggplot(err_rate, aes(x = ntrees, y = OOB)) +
   geom_line(color = "skyblue1", linewidth = 1) +
-  labs(x = "Number of Trees", y = "OBB Error", title = "Out Of Bags (OOB) error") +
+  labs(x = "Number of Trees", y = "OOB Error", title = "Out Of Bag (OOB) Error") +
   theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) # Plot OOB error
 ```
 
 
@@ -601,26 +598,28 @@ ggplot(err_rate, aes(x = ntrees, y = OOB)) +
 ```{r testing, echo=FALSE}
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
 pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$test, type = "prob")
-positive_class_probs <- pred_probs[, "will_die_within_10_years"]
+positive_class_probs <- pred_probs[, "will_die_within_10_years"] # Select probabilities for "will_die_within_10_years"
 
-# Generate the ROC curve
+# Generate the ROC curve for the test set
 roc_curve <- roc(best_class_data$test$prognosis, positive_class_probs, levels = levels(best_class_data$test$prognosis), direction = ">")
 
-# Create Precision-Recall curve
+# Create Precision-Recall curve for the test set
 pr_curve <- pr.curve(
-  scores.class0 = positive_class_probs,
-  weights.class0 = as.numeric(best_class_data$test$prognosis == "will_die_within_10_years"),
-  curve = TRUE
+  scores.class0 = positive_class_probs, # Probabilities for the positive class
+  weights.class0 = as.numeric(best_class_data$test$prognosis == "will_die_within_10_years"), # Binary vector for positive class
+  curve = TRUE # Return curve for plotting
 )
 
 # Save precision and recall plots as PNG
-png("precision_recall_plots_train_test.png", width = 1600, height = 800)
+png("precision_recall_plots_train_test.png", width = 1600, height = 800) # Save output to PNG file
 
-# Plot combined graphs
-op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1)
-plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC", las = 1)
-plot(roc_curve, col = "blue", add = TRUE, main = "ROC", las = 1)
-legend("bottomright",
+# Plot combined graphs (ROC and Precision-Recall curves side by side)
+op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1) # Set layout to 1 row, 2 columns
+
+# Plot ROC curve for both training and testing
+plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC", las = 1) # Training ROC
+plot(roc_curve, col = "blue", add = TRUE, main = "ROC", las = 1) # Testing ROC
+legend("bottomright", # Add legend with AUC values
   legend = c(
     paste0("AUC (Training) = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 2)),
     paste0("AUC (Testing) = ", signif(roc_curve$auc, 2))
@@ -628,10 +627,10 @@ legend("bottomright",
   col = c("red", "blue"), lty = 1, bty = "n"
 )
 
-# Plot the Precision-Recall curve for the training data
-plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-Recall Curve", xlab = "Recall", ylab = "Precision")
-lines(pr_curve$curve[, 3], pr_curve$curve[, 1], col = "blue")
-legend("topright",
+# Plot Precision-Recall curve for both training and testing
+plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-Recall Curve", xlab = "Recall", ylab = "Precision") # Training PRC
+lines(pr_curve$curve[, 3], pr_curve$curve[, 1], col = "blue") # Testing PRC
+legend("topright", # Add legend with AUC values
   legend = c(
     paste0("AUC (Training) = ", round(best_class_data$best_model_overall$prc$auc, 2)),
     paste0("AUC (Testing) = ", round(pr_curve$auc.integral, 2))
@@ -641,31 +640,29 @@ legend("topright",
   bty = "n"
 )
 
-# Reset plotting parameters and close PNG
+# Reset plotting parameters and close PNG file
 par(op)
 dev.off()
 
-# Find the best threshold from the ROC curve (maximizing sensitivity-specificity balance)
-best_threshold <- as.numeric(coords(roc_curve, "best", ret = "threshold"))
+# Find the best threshold from the ROC curve
+best_threshold <- as.numeric(coords(roc_curve, "best", ret = "threshold")) # Threshold maximizing sensitivity-specificity
 print(paste("Best threshold based on ROC curve:", best_threshold))
 
 # Apply the best threshold for classification
-pred_best_threshold <- ifelse(positive_class_probs > best_threshold,
-  "will_die_within_10_years",
-  "will_die_within_5_years"
-)
+pred_best_threshold <- ifelse(positive_class_probs > best_threshold, "will_die_within_10_years", "will_die_within_5_years") # Classify based on threshold
 
-# Ensure the predicted classes are factors with the correct levels
+# Ensure predicted classes have the correct factor levels
 pred_best_threshold <- factor(pred_best_threshold, levels = levels(best_class_data$test$prognosis))
 
-# Calculate accuracy on the test set with the best threshold
-pred_table <- table(pred_best_threshold, best_class_data$test$prognosis)
-dimnames(pred_table) <- list(
+# Calculate accuracy on the test set using the best threshold
+pred_table <- table(pred_best_threshold, best_class_data$test$prognosis) # Create confusion matrix table
+dimnames(pred_table) <- list( # Assign dimension names to match factor levels
   c("will_die_within_10_years", "will_die_within_5_years"),
   c("will_die_within_10_years", "will_die_within_5_years")
 )
-test_confusion <- confusionMatrix(pred_table)
+test_confusion <- confusionMatrix(pred_table) # Compute confusion matrix
 test_confusion
 
+# Plot the confusion matrix for the test set
 confusionPlot(test_confusion, title = "Confusion Matrix (Testing Set)")
 ```

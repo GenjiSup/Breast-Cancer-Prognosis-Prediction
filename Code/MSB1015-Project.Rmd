@@ -1,11 +1,11 @@
 ---
 title: "MSB1015 Project"
 author: "Carlo Alberto Zani"
-date: "2024-09-08"
+date: "2024-10-14"
 output: html_document
 ---
 
-#0. Setup
+# 0. Setup
 ```{r setup, include=FALSE}
 library(rstudioapi)
 library(readr)
@@ -19,143 +19,152 @@ library(GGally)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd()
 
-# data <- read_csv("METABRIC_RNA_Mutation.csv")
+data <- read_csv("METABRIC_RNA_Mutation.csv")
 ```
 
 
-# Data Cleaning
+# 0.1 Data Cleaning
 ```{r cleaning, echo=FALSE}
-# # Check for duplicates
-# any(duplicated(data))
-# 
-# # Check for missing values
-# missing_counts <- data %>%
-#   summarise(across(everything(), ~ sum(is.na(.)))) %>%
-#   pivot_longer(everything(), names_to = "column", values_to = "missing_count") %>%
-#   filter(missing_count > 10)
-# 
-# # Plot where those missing values were found
-# ggplot(missing_counts, aes(x = reorder(column, missing_count), y = missing_count)) +
-#   geom_bar(stat = "identity", fill = "skyblue1") +
-#   coord_flip() +
-#   labs(x = "Column", y = "Missing Count", title = "Columns with More Than 10 Missing Values")
-# 
-# data$tumor_stage <- as.character(data$tumor_stage)
-# 
-# data$neoplasm_histologic_grade <- as.character(data$neoplasm_histologic_grade)
-# 
-# # Apply the modifications
-# data_filled <- data %>%
-#   
-#   # 1. Replace missing values with "Unknown" for all categorical columns
-#   mutate(oncotree_code = replace_na(oncotree_code, "Unknown"),
-#          cancer_type_detailed = replace_na(cancer_type_detailed, "Unknown" )) %>%
-#   
-#   mutate(across(where(is.character), ~ factor(replace_na(., "Unknown")))) %>%
-#   
-#   # 3. Replace missing values with the median for "tumor_size"
-#   mutate(tumor_size = ifelse(is.na(tumor_size), median(tumor_size, na.rm = TRUE), tumor_size)) %>%
-#   
-#   # 4. Replace missing values with 0 for columns ending with "_mut"
-#   mutate(across(ends_with("_mut"), ~ replace_na(., 0))) %>%
-#   
-#   # 5. Convert the columns ending with "_mut" to a logical vector
-#   mutate(across(ends_with("_mut"), ~ ifelse(. != "0", 1, 0))) %>%
-#   
-#   # 6.  
-#   rowwise() %>%
-#   mutate(mutation_count = sum(across(ends_with("_mut")) == 1))
-# 
-# # Check for missing values after cleaning
-# sum(is.na(data_filled))
-# 
-# # Select only the transcription data
-# pca_gx <- data_filled %>%
-#   select(brca1:ugt2b7)
-# 
-# # Perform PCA to check the columns with the highest amount of missing values
-# pca <- prcomp(pca_gx)
-# 
-# # Convert PCA results to data frame
-# pca_data <- as.data.frame(pca$x[, 1:3])
-# pca_data$tumor_stage <- as.factor(data_filled$tumor_stage)
-# 
-# # Create pairwise plots using ggpairs
-# ggpairs(pca_data, mapping = aes(color = tumor_stage), 
-#         upper = list(continuous = wrap("points")),
-#         lower = list(continuous = wrap("points")),
-#         diag = list(continuous = wrap("barDiag"))) +
-#   theme_minimal()
+# Check for duplicates
+any(duplicated(data))
+
+# Check for missing values
+missing_counts <- data %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "column", values_to = "missing_count") %>%
+  filter(missing_count > 10)
+
+# Plot where those missing values were found
+ggplot(missing_counts, aes(x = reorder(column, missing_count), y = missing_count)) +
+  geom_bar(stat = "identity", fill = "skyblue1") +
+  coord_flip() +
+  labs(x = "Column", y = "Missing Count", title = "Columns with More Than 10 Missing Values")
+
+data$tumor_stage <- as.factor(data$tumor_stage)
+
+data$neoplasm_histologic_grade <- as.factor(data$neoplasm_histologic_grade)
+
+# Apply the modifications
+data_filled <- data %>%
+  # 1. Replace missing values with "Unknown" for all categorical columns
+  mutate(
+    oncotree_code = replace_na(oncotree_code, "Unknown"),
+    cancer_type_detailed = replace_na(cancer_type_detailed, "Unknown")
+  ) %>%
+  # 3. Replace missing values with the median for "tumor_size"
+  mutate(tumor_size = ifelse(is.na(tumor_size), median(tumor_size, na.rm = TRUE), tumor_size)) %>%
+  # 4. Replace missing values with 0 for columns ending with "_mut"
+  mutate(across(ends_with("_mut"), ~ replace_na(., 0))) %>%
+  # 5. Convert the columns ending with "_mut" to a logical vector
+  mutate(across(ends_with("_mut"), ~ ifelse(. != "0", 1, 0))) %>%
+  # 6.
+  rowwise() %>%
+  mutate(mutation_count = sum(across(ends_with("_mut")) == 1))
+
+# Check for missing values after cleaning
+sum(is.na(data_filled))
+
+# Select only the transcription data
+pca_gx <- data_filled %>%
+  select(brca1:ugt2b7)
+
+# Perform PCA to check the columns with the highest amount of missing values
+pca <- prcomp(pca_gx)
+
+# Convert PCA results to data frame
+pca_data <- as.data.frame(pca$x[, 1:3])
+pca_data$tumor_stage <- as.factor(data_filled$tumor_stage)
+
+# Create pairwise plots using ggpairs
+ggpairs(pca_data,
+  mapping = aes(color = tumor_stage),
+  upper = list(continuous = wrap("points")),
+  lower = list(continuous = wrap("points")),
+  diag = list(continuous = wrap("barDiag"))
+) +
+  theme_minimal()
 ```
 
 
-# Imputation
+# 0.2 Imputation (this step will take some time)
 ```{r impute, echo=FALSE}
+# Load necessary libraries
+library(mice)
 
-# # Load necessary libraries
-# # library(mice)
-# 
-# # Get rid of unwanted characters from the column names
-# colnames(data_filled) <- make.names(colnames(data_filled), unique = TRUE)
-# 
-# # Convert all character variables to factors
-# data_filled <- data_filled %>%
-#   mutate(across(where(is.character), as.factor))
-# 
-# # Wrap 'tumor_stage' as a factor
-# data_filled$tumor_stage <- as.factor(data_filled$tumor_stage)
-# 
-# data_filled$neoplasm_histologic_grade <- as.factor(data_filled$neoplasm_histologic_grade)
-# 
-# # Identify categorical variables
-# fac_vars <- names(data_filled)[sapply(data_filled, is.factor)]
-# 
-# # Specify methods for all variables, setting CART for categorical variables
-# meth <- make.method(data_filled)
-# meth[fac_vars] <- "cart" # Use CART for all categorical variables
-# 
-# # Perform the imputation using mice
-# imputation_result <- mice(data_filled, method = meth, m = 5)
-# 
-# imputed_data <- complete(imputation_result)
-# 
-# write.csv(imputed_data, file = "imputed_data.csv", row.names = FALSE)
+# Get rid of unwanted characters from the column names
+colnames(data_filled) <- make.names(colnames(data_filled), unique = TRUE)
+
+# Convert all character variables to factors
+data_filled <- data_filled %>%
+  mutate(across(where(is.character), as.factor))
+
+# Identify categorical variables
+fac_vars <- names(data_filled)[sapply(data_filled, is.factor)]
+
+# Specify methods for all variables, setting CART for categorical variables
+meth <- make.method(data_filled)
+meth[fac_vars] <- "cart" # Use CART for all categorical variables
+
+set.seed(111)
+
+# Perform the imputation using the 'mice' package
+imputation_result <- mice(data_filled,
+  method = "cart", # 'meth' contains the method for categorical imputation (CART)
+  m = 5 # 5 is the commonly chosen value for the number of multiple imputations to perform
+)
+
+imputed_data <- complete(imputation_result)
+
+write.csv(imputed_data, file = "imputed_data.csv", row.names = FALSE)
 ```
 
 
-# Plots for imputation
-```{r Plots after imputation}
-# # Convert 'tumor_stage' to a factor in both datasets
-# data$tumor_stage <- as.factor(data$tumor_stage)
-# imputed_data$tumor_stage <- as.factor(imputed_data$tumor_stage)
-# 
-# # Create a combined dataset for plotting
-# plot_data <- bind_rows(
-#   data %>% select(tumor_stage) %>% mutate(Source = 'Original'),
-#   imputed_data %>% select(tumor_stage) %>% mutate(Source = 'Imputed')
-# )
-# 
-# # Plot both distributions
-# ggplot(data, aes(x = tumor_stage)) +
-#   geom_bar(position = "dodge") +
-#   labs(title = "Distribution of Tumor Stage: Original vs Imputed",
-#        x = "Tumor Stage",
-#        y = "Count") +
-#   theme_minimal()
+# 0.3 Plots for imputation
+```{r plots after imputation, echo=FALSE}
+# Load the imputed data from the previous steps
+imputed_data <- read_csv("imputed_data.csv")
+
+# Convert 'tumor_stage' to a factor in both datasets
+data$tumor_stage <- as.factor(data$tumor_stage)
+imputed_data$tumor_stage <- as.factor(imputed_data$tumor_stage)
+
+# Create a combined dataset for plotting
+plot_data <- bind_rows(
+  data %>% select(tumor_stage) %>% mutate(Source = "Original"),
+  imputed_data %>% select(tumor_stage) %>% mutate(Source = "Imputed")
+)
+
+# Plot the imputed vs original
+ggplot(plot_data, aes(x = tumor_stage, fill = Source)) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Distribution of missing values for Tumor Stage: Original vs Imputed",
+    x = "Tumor Stage",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Original" = "royalblue", "Imputed" = "firebrick1"))
 ```
 
 
 # 1. Filtering
-```{r}
-# Check for outliers
-imputed_data <- read_csv("imputed_data.csv")
-
+```{r isotree filtering, echo=FALSE}
+# You might get an error when loading this package but just run it again and it should work
 library(isotree)
 
-x<-isolation.forest(imputed_data, ndim = 1, sample_size = 256, max_depth = 8, ntrees = 100, missing_action = "fail", categ_split_type="single_categ", scoring_metric="density")
+# In the 'isolation.forest' function parameters were kept as recommended (not default).
+isolation_result <- isolation.forest(imputed_data,
+  ndim = 1, # It was recommended for data with many categorical variables like mine
+  sample_size = 256, # This was the recommended value in most sources
+  max_depth = 8, # ceiling(log2(256)) is the recommended value
+  ntrees = 1000, # The recommended is 100 but the more trees the better usually.
+  missing_action = "fail", # The imputed data has no missing values but in case it does the function would stop
+  categ_split_type = "single_categ", # It was recommended for data with many categorical variables like mine
+  scoring_metric = "depth" # The depth score gives the best performance when looking at literature
+)
 
 data_filtered <- imputed_data
-data_filtered$pred <- predict(x, imputed_data)
+data_filtered$pred <- predict(isolation_result, imputed_data)
 
 # Create a data frame for plotting
 scores_df <- data.frame(
@@ -164,23 +173,17 @@ scores_df <- data.frame(
 
 # Plot the distribution of outlier scores
 ggplot(scores_df, aes(x = OutlierScore)) +
-  geom_histogram(bins = 30, fill = "blue", color = "black") +
+  geom_histogram(bins = 30, fill = "royalblue", color = "black") +
   labs(x = "Outlier Score", y = "Frequency", title = "Distribution of Outlier Scores") +
   theme_minimal()
-
-# Calculate mean and standard deviation
-mean_score <- mean(data_filtered$pred, na.rm = TRUE)
-sd_score <- sd(data_filtered$pred, na.rm = TRUE)
 
 # Store the original number of rows before filtering
 original_count <- nrow(data_filtered)
 
-lower_threshold <- mean_score - 2*sd_score
-
-# Filter out rows where the score is outside of 2 standard deviations from the mean
+# Filter out rows where the score is above 0.5 which is the standard value for outlier detection
 data_filtered <- data_filtered %>%
-  filter(pred >= lower_threshold) %>%
-  select(-pred)  # Remove the 'pred' column
+  filter(pred <= 0.5) %>%
+  select(-pred)
 
 # Store the number of rows after filtering
 filtered_count <- nrow(data_filtered)
@@ -195,7 +198,6 @@ cat("Number of eliminated variables:", eliminated_count, "\n")
 
 # 2. The random forest
 ```{r data tranformation for random forest, echo=FALSE}
-
 # Load required packages
 library(randomForest)
 library(caTools)
@@ -208,7 +210,7 @@ library(PRROC)
 library(pROC)
 library(gridExtra)
 
-# Create a function to create the prognosis variable
+# Create a function to form the prognosis variable
 categorise_prognosis <- function(months) {
   case_when(
     months <= 60 + (60 * 0.25) ~ "will_die_within_5_years",
@@ -216,25 +218,26 @@ categorise_prognosis <- function(months) {
   )
 }
 
-# Process the data
+# Create the categorical dataframe
 categorical_data <- data_filtered %>%
-  select(age_at_diagnosis:death_from_cancer) %>%
+  select(age_at_diagnosis:death_from_cancer) %>% # Extract the categorical variables
   filter(death_from_cancer != "Died of Other Causes") %>%
   filter(overall_survival == 0) %>%
   mutate(
-    prognosis = as.factor(categorise_prognosis(overall_survival_months))
+    prognosis = as.factor(categorise_prognosis(overall_survival_months)) # Call the function to create 'prognosis'
   ) %>%
   select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
   as.data.frame()
 
 source("~/University/MSB/MSB1015/funPCA.R") # Change the directory as needed
 
-# Call the function and plot
+# Call the function for the unsupervised random forest PCA
 pca_plots_categorical <- pca_proximity_plot(categorical_data, "prognosis")
 grid.arrange(grobs = pca_plots_categorical, ncol = 2)
 
+# Create the genetic dataframe
 genetic_data <- data_filtered %>%
-  select(brca1:stmn2_mut, overall_survival_months, death_from_cancer, overall_survival) %>%
+  select(brca1:stmn2_mut, overall_survival_months, death_from_cancer, overall_survival) %>% # Extract the genetic variables and those needed to calculate prognosis
   filter(death_from_cancer != "Died of Other Causes") %>%
   filter(overall_survival == 0) %>%
   mutate(
@@ -243,10 +246,11 @@ genetic_data <- data_filtered %>%
   select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
   as.data.frame()
 
-# Call the function and plot
+# Call the function for the unsupervised random forest PCA (will take a few minutes)
 pca_plots_genetic <- pca_proximity_plot(genetic_data, "prognosis")
 grid.arrange(grobs = pca_plots_genetic, ncol = 2)
 
+# Create the complete dataframe
 complete_data <- data_filtered %>%
   filter(death_from_cancer != "Died of Other Causes") %>%
   filter(overall_survival == 0) %>%
@@ -256,126 +260,259 @@ complete_data <- data_filtered %>%
   select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
   as.data.frame()
 
-# Call the function and plot
+# Call the function for the unsupervised random forest PCA (will take a few minutes)
 pca_plots_complete <- pca_proximity_plot(complete_data, "prognosis")
 grid.arrange(grobs = pca_plots_complete, ncol = 2)
 ```
 
 
-# 2.1 The random forest
-```{r random forest, echo=FALSE}
+# 2.1 The random forest function
+```{r random forest function, echo=FALSE}
+random_forest <- function(data, ntree, nrun) {
+  # Set the seed for reproducibility using the L'Ecuyer-CMRG method
+  set.seed(111, "L'Ecuyer-CMRG")
 
-# Set the seed for reproducibility of random results using the L'Ecuyer-CMRG method
-set.seed(111, "L'Ecuyer-CMRG")
+  # Initialize an empty list to store models from repeated runs
+  store_models_repeated <- vector("list", nrun)
 
-# Create a partition to split the data into training and testing sets
-# The target variable for stratification is 'prognosis', with 70% of the data for training
-trainIndex <- createDataPartition(categorical_data$prognosis, p = .7, 
-                                  list = FALSE,  # Return indices as a matrix
-                                  times = 1)     # Perform the partitioning once
+  # Loop to perform nested cross-validation nrun times
+  for (repeat_run in 1:nrun) {
+    # Create a partition to split the data into training and testing sets
+    # The target variable for stratification is 'prognosis', with 70% of the data for training
+    trainIndex <- createDataPartition(data$prognosis,
+      p = .7,
+      list = FALSE, # Return indices as a matrix
+      times = 1
+    ) # Perform the partitioning once
 
-# Subset the original data to create the training set using the indices from trainIndex
-train <- categorical_data[trainIndex,]
+    # Subset the original data to create training and testing sets
+    train <- data[trainIndex, ]
+    test <- data[-trainIndex, ]
 
-# Subset the original data to create the testing set using the remaining indices
-test  <- categorical_data[-trainIndex,]
+    # Ensure "prognosis" is a factor
+    train$prognosis <- as.factor(train$prognosis)
+    test$prognosis <- as.factor(test$prognosis)
 
-# Ensure "prognosis" is a factor
-train$prognosis <- as.factor(train$prognosis)
-test$prognosis <- as.factor(test$prognosis)
+    # Convert train features to data frames
+    train_features <- as.data.frame(train %>% select(-prognosis))
+    y_train <- train$prognosis
 
-# Convert train and test features to data frames to avoid tibble row name issues
-train_features <- as.data.frame(train %>% select(-prognosis))
-test_features <- as.data.frame(test %>% select(-prognosis))
-y_train <- train$prognosis
+    # Random oversampling of the minority class from 'prognosis'
+    train_sample <- randomsample(y_train, train_features)
+    y_train <- train_sample$y
+    x_train <- train_sample$x
 
-train_sample <- randomsample(y_train, train_features)
-y_train <- train_sample$y
-x_train <- train_sample$x
+    # Define the resampling strategy for outer cross-validation.
+    inner_control <- trainControl(
+      method = "cv", # Method was kept as cross validation as standard since it performed the best
+      number = 5, # 5 folds were used for the inner folds as it gave the best result
+      search = "grid", # A grid search was used to test the different tuning variables defined later
+      summaryFunction = twoClassSummary, # Used to retrieve the values need for the ROC and PR curves
+      classProbs = TRUE # Used to retrieve the values need for the ROC and PR curves
+    ) # Everything else was kept standard and NULL as it was not needed.
 
+    # Create a tune grid for the 'mtry' variable
+    tuneGrid <- expand.grid(mtry = 2:8)
 
-# Define the resampling strategy for outer cross-validation
-inner_control <- trainControl(method = "cv", number = 5, search = "grid", summaryFunction = twoClassSummary, classProbs = TRUE)
+    # The model with the highest AUC that I found was with 2000 trees and node size of 1.
+    nodesize <- c(1)
+    params <- expand.grid(ntrees = ntree, nodesize = nodesize)
 
-tuneGrid <- expand.grid(mtry = 2:8)
+    # Store models for the current repeat
+    store_models <- vector("list", nrow(params))
 
-# The model with the highest AUC that I found was with 2000 trees and node size of 1. 
-# When creating the model these values can be changed.
-ntrees <- c(2000) 
-nodesize <- c(1)
+    # Nested cross-validation loop with Random Forest
+    for (i in 1:nrow(params)) {
+      nodesize <- params[i, 2]
+      ntree <- params[i, 1]
 
-# List for the combinations: should have all the possible combinations between ntrees and nodesize.
-list <- 1
+      # Train the model with the specified parameters.
+      nested_result <- nestcv.train(
+        x = x_train,
+        y = y_train,
+        method = "rf", # Random forest from the 'randomForest' function
+        savePredictions = "final", # 'savePredictions' was kept as final so that it would save the final model with the best scores.
+        trControl = inner_control, # Use the inner cross-validation control
+        tuneGrid = tuneGrid, # The tune grid is used for the tuning
+        ntree = ntree, # One of the tuned variables
+        nodesize = nodesize, # One of the tuned variables
+        importance = TRUE, # The importance of the variables is scored for later visualisation
+        cv.cores = 8, # Here you can set how many cores to use for parallelisation
+        metric = "ROC", # The 'ROC' metric is used to optimise the models as it is a better representation of performance compared to accuracy.
+        filterFUN = rf_filter # Filtering of the variables helps, especially with the genetic and full databases
+      )
 
-# Define the grid for hyperparameter tuning
-params <- expand.grid(ntrees = ntrees,
-                      nodesize = nodesize)
+      # Store the result
+      store_models[[i]] <- nested_result
+      names(store_models)[i] <- paste0("ntree_", ntree, "_nodesize_", nodesize)
+    }
 
-store_models <- vector("list", nrow(params))
+    # Assign the models from this run to store_models_repeated
+    store_models_repeated[[repeat_run]] <- store_models
+  }
 
-# Perform nested cross-validation with Random Forest
-for(i in 1:nrow(params)) {
-  nodesize <- params[i,2]
-  ntree <- params[i,1]
-  
-  # Train the model with the specified parameters
-  nested_result <- nestcv.train(
-    x = x_train,
-    y = y_train,
-    method = "rf",
-    savePredictions = "final",
-    trControl = inner_control,  # Use the inner cross-validation control
-    tuneGrid = tuneGrid,
-    ntree = ntree,
-    nodesize = nodesize,
-    importance = TRUE,
-    cv.cores = 8,
-    metric = "ROC",
-    filterFUN = rf_filter
-  )
-  
-  # Assign the nested result to store_models and name it based on parameters
-  store_models[[i]] <- nested_result
-  names(store_models)[i] <- paste0("ntree_", ntree, "_nodesize_", nodesize)
+  # Initialize an empty list to store the metrics for all repetitions
+  metrics_list_repeated <- list()
+
+  # Loop over all repetitions and calculate metrics for each model
+  for (run in seq_along(store_models_repeated)) {
+    store_models <- store_models_repeated[[run]]
+
+    # Initialize an empty list to store the metrics for this repetition
+    metrics_list <- list()
+
+    # Loop over the models in the current repetition
+    for (i in seq_along(store_models)) {
+      # Apply the metrics function to each model
+      metrics_list[[names(store_models)[i]]] <- metrics(store_models[[i]])
+    }
+
+    # Combine the list of metrics into a dataframe
+    metrics_df <- do.call(rbind, metrics_list)
+    metrics_df <- as.data.frame(metrics_df)
+
+    # Store the metrics for this repetition
+    metrics_list_repeated[[run]] <- metrics_df
+  }
+
+  # Find the best model across all repetitions
+  best_model_overall <- NULL
+  best_auc <- 0
+
+  for (run in seq_along(metrics_list_repeated)) {
+    metrics_df <- metrics_list_repeated[[run]]
+
+    # Find the model with the highest AUC in this repetition
+    best_model_index <- which.max(metrics_df$AUC)
+
+    # Check if it's the best model overall
+    if (metrics_df$AUC[best_model_index] > best_auc) {
+      best_auc <- metrics_df$AUC[best_model_index]
+      best_model_overall <- store_models_repeated[[run]][[best_model_index]]
+    }
+  }
+
+  # Get an overview of the best model
+  print("Best Model Summary")
+  summary(best_model_overall)
+
+  # Return the best model and the list of models for each repetition
+  return(list(best_model_overall = best_model_overall, store_models_repeated = store_models_repeated, train = train, test = test))
 }
-
 ```
 
 
-# 2.2 Finding the best model
-```{r best model, echo=FALSE}
-# Initialize an empty list to store the metrics
-metrics_list <- list()
+# 2.2 Calling the random forest function
+```{r perform random forest, echo=FALSE}
+# Categorical results
+results_categorical <- random_forest(categorical_data, ntree = 10, nrun = 2)
 
-# Loop over the indices in the provided list
-for (i in seq_along(store_models)) {
-  # Apply the metrics function to each model in store_models
-  metrics_list[[names(store_models)[i]]] <- metrics(store_models[[i]])
-}
+# Genetic results
+results_genetic <- random_forest(genetic_data, ntree = 10, nrun = 2)
 
-# Combine the list of metrics into a dataframe
-metrics_df <- do.call(rbind, metrics_list)
-metrics_df <- as.data.frame(metrics_df)
-
-# View the resulting dataframe
-print(metrics_df)
-
-# Find the model with the highest AUC
-best_model_index <- which.max(metrics_df$AUC)
-
-# Access the best model based on the highest ROC
-best_model <- store_models[[best_model_index]]
-
-# Get an overview of the best model
-summary(best_model)
+# Complete results
+results_complete <- random_forest(complete_data, ntree = 10, nrun = 2)
 ```
 
 
+# 3.1 Create a function to the scores for all the models
+```{r model performance function, echo=FALSE}
+# Create the function to extract the metrics from the result list
+get_final_metrics <- function(results_data) {
+  # Initialize an empty list to store all metrics from all repetitions
+  all_metrics_list <- list()
 
-# 2.3 ROC and PR curves on the best model
+  # Loop over all repetitions and calculate metrics for each model
+  for (run in seq_along(results_data[[2]])) {
+    store_models <- results_data[[2]][[run]]
+
+    # Initialize an empty list to store the metrics for this repetition
+    metrics_list <- list()
+
+    # Loop over the models in the current repetition
+    for (i in seq_along(store_models)) {
+      # Apply the metrics function to each model
+      metrics_list[[names(store_models)[i]]] <- metrics(store_models[[i]])
+    }
+
+    # Combine the list of metrics into a dataframe
+    metrics_df <- do.call(rbind, metrics_list)
+    metrics_df <- as.data.frame(metrics_df)
+
+    # Add the run information to the metrics dataframe
+    metrics_df$Run <- run # Adding a column to indicate which repetition the metrics belong to
+
+    # Store the metrics for this repetition
+    all_metrics_list[[run]] <- metrics_df
+  }
+
+  # Combine all metrics from all runs into a single dataframe
+  final_metrics_df <- do.call(rbind, all_metrics_list)
+
+  # Transpose the dataframe
+  t_final_metrics_df <- t(final_metrics_df)
+
+  # Convert the matrix to a data frame and keep only the 1st and 3rd rows (AUC, Balanced Accuracy)
+  t_final_metrics_df <- as.data.frame(t_final_metrics_df[c(1, 3), ])
+
+  # Compute the average across the rows
+  t_final_metrics_df <- t_final_metrics_df %>%
+    rowwise() %>%
+    mutate(average = mean(c_across(everything()), na.rm = TRUE)) %>%
+    ungroup() %>%
+    mutate(Metric = c("AUC", "Balanced Accuracy"))
+
+  # Return the final metrics dataframe
+  return(t_final_metrics_df)
+}
+```
+
+
+# 3.2 Call the function to find the best model
+```{r create the metric dataframes, echo=FALSE}
+# Categorical metrics
+metrics_categorical <- get_final_metrics(results_categorical)
+print(metrics_categorical)
+
+# Genetic metrics
+metrics_genetic <- get_final_metrics(results_genetic)
+print(metrics_genetic)
+
+# Complete metrics
+metrics_complete <- get_final_metrics(results_complete)
+print(metrics_complete)
+
+# Add class column to each dataframe
+metrics_categorical$class <- "categorical"
+metrics_genetic$class <- "genetic"
+metrics_complete$class <- "complete"
+
+# Combine all dataframes into one
+all_metrics <- bind_rows(metrics_categorical, metrics_genetic, metrics_complete)
+
+# Extract only the rows corresponding to AUC
+auc_metrics <- all_metrics %>%
+  filter(Metric == "AUC") %>%
+  filter(average == max(average))
+
+# Extract and print the class of the best model
+best_model_class <- auc_metrics$class
+
+# Create the name of the dataset corresponding to the best model class
+best_class_name <- paste("results_", best_model_class, sep = "")
+
+# Print the best class name
+print(best_class_name)
+
+# Get the the name of the data with the best model
+best_class_data <- get(best_class_name)
+```
+
+
+# 4. ROC and PR curves on the best model from the best class
 ```{r accuracy and plotting, echo=FALSE}
 # Calculate accuracy on the train set for the best model
-pred_table_training <- table(best_model$output$predy, best_model$output$testy)
+pred_table_training <- table(best_class_data$best_model_overall$output$predy, best_class_data$best_model_overall$output$testy)
 train_confusion <- confusionMatrix(pred_table_training)
 train_confusion
 
@@ -384,21 +521,21 @@ source("~/University/MSB/MSB1015/confusionPlot.R") # Change the directory as nee
 confusionPlot(train_confusion, title = "Confusion Matrix (Training Set)")
 
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
-pred_probs <- predict(best_model, newdata = train, type = "prob")
+pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$train, type = "prob")
 positive_class_probs <- pred_probs[, "will_die_within_10_years"]
 
 # Get the precision recall values
-best_model$prc <- prc(best_model)
+best_class_data$best_model_overall$prc <- prc(best_class_data$best_model_overall)
 
 # Save precision and recall plots as PNG
 png("precision_recall_plots_training.png", width = 1600, height = 800)
 
 # Plot precision and recall
 op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1)
-plot(best_model$roc, col = "red", main = "ROC Training", las = 1)
-legend("bottomright", legend = paste0("AUC = ", signif(pROC::auc(best_model$roc), 3)), bty = 'n')
-plot(best_model$prc, col = "red", main = "Precision-recall Training")
-legend("topright", legend = paste0("AUC = ", round(best_model$prc$auc, 3)), bty = 'n')
+plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC Training", las = 1)
+legend("bottomright", legend = paste0("AUC = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 3)), bty = "n")
+plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-recall Training")
+legend("topright", legend = paste0("AUC = ", round(best_class_data$best_model_overall$prc$auc, 3)), bty = "n")
 
 # Reset plotting parameters
 par(op)
@@ -407,30 +544,36 @@ par(op)
 dev.off()
 
 # Extract the importance of the variables for the best model
-importance <- as.data.frame(best_model$final_fit$finalModel$importance) %>%
-  mutate(will_die_within_10_years = will_die_within_10_years * 10,
-         will_die_within_5_years = will_die_within_5_years * 10,
-         column = row.names(best_model$final_fit$finalModel$importance))
+importance <- as.data.frame(best_class_data$best_model_overall$final_fit$finalModel$importance) %>%
+  mutate(
+    will_die_within_10_years = will_die_within_10_years * 10,
+    will_die_within_5_years = will_die_within_5_years * 10,
+    column = row.names(best_class_data$best_model_overall$final_fit$finalModel$importance)
+  )
 
 importance_sorted <- importance[order(importance$will_die_within_10_years, decreasing = TRUE), ]
 head(importance_sorted)
 
 # Plot the importance of the variables
 ggplot(importance, aes(x = reorder(column, will_die_within_10_years))) +
-  geom_bar(aes(y = will_die_within_10_years, fill = "Will die within 10 years"), 
-           position = "dodge", stat = "identity") +
-  geom_bar(aes(y = will_die_within_5_years, fill = "Will die within 5 years"), 
-           position = "dodge", stat = "identity") +
-  scale_fill_manual(values = c("Will die within 10 years" = "skyblue1", 
-                               "Will die within 5 years" = "tomato")) +
+  geom_bar(aes(y = will_die_within_10_years, fill = "Will die within 10 years"),
+    position = "dodge", stat = "identity"
+  ) +
+  geom_bar(aes(y = will_die_within_5_years, fill = "Will die within 5 years"),
+    position = "dodge", stat = "identity"
+  ) +
+  scale_fill_manual(values = c(
+    "Will die within 10 years" = "skyblue1",
+    "Will die within 5 years" = "tomato"
+  )) +
   coord_flip() +
   labs(x = "Feature", y = "Importance Score", title = "Variable Importance", fill = "Prognosis") +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
 
 # Extract the error rates (OOB)
-err_rate <- as.data.frame(best_model$final_fit$finalModel$err.rate) %>%
-  mutate(ntrees = 1:nrow(best_model$final_fit$finalModel$err.rate))
+err_rate <- as.data.frame(best_class_data$best_model_overall$final_fit$finalModel$err.rate) %>%
+  mutate(ntrees = 1:nrow(best_class_data$best_model_overall$final_fit$finalModel$err.rate))
 
 # Plot OOB
 ggplot(err_rate, aes(x = ntrees, y = OOB)) +
@@ -441,43 +584,49 @@ ggplot(err_rate, aes(x = ntrees, y = OOB)) +
 ```
 
 
-
-# 2.4 Testing
+# 5. Testing on the best model
 ```{r testing, echo=FALSE}
-
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
-pred_probs <- predict(best_model, newdata = test, type = "prob")
+pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$test, type = "prob")
 positive_class_probs <- pred_probs[, "will_die_within_10_years"]
 
 # Generate the ROC curve
-roc_curve <- roc(test$prognosis, positive_class_probs, levels = levels(test$prognosis), direction = ">")
+roc_curve <- roc(best_class_data$test$prognosis, positive_class_probs, levels = levels(best_class_data$test$prognosis), direction = ">")
 
 # Create Precision-Recall curve
-pr_curve <- pr.curve(scores.class0 = positive_class_probs, 
-                     weights.class0 = as.numeric(test$prognosis == "will_die_within_10_years"), 
-                     curve = TRUE)
+pr_curve <- pr.curve(
+  scores.class0 = positive_class_probs,
+  weights.class0 = as.numeric(best_class_data$test$prognosis == "will_die_within_10_years"),
+  curve = TRUE
+)
 
 # Save precision and recall plots as PNG
 png("precision_recall_plots_train_test.png", width = 1600, height = 800)
 
 # Plot combined graphs
 op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1)
-plot(best_model$roc, col = "red", main = "ROC", las = 1)
+plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC", las = 1)
 plot(roc_curve, col = "blue", add = TRUE, main = "ROC", las = 1)
-legend("bottomright", 
-       legend = c(paste0("AUC (Training) = ", signif(pROC::auc(best_model$roc), 2)), 
-                  paste0("AUC (Testing) = ", signif(roc_curve$auc, 2))), 
-       col = c("red", "blue"), lty = 1, bty = 'n')
+legend("bottomright",
+  legend = c(
+    paste0("AUC (Training) = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 2)),
+    paste0("AUC (Testing) = ", signif(roc_curve$auc, 2))
+  ),
+  col = c("red", "blue"), lty = 1, bty = "n"
+)
 
 # Plot the Precision-Recall curve for the training data
-plot(best_model$prc, col = "red", main = "Precision-Recall Curve", xlab = "Recall", ylab = "Precision")
+plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-Recall Curve", xlab = "Recall", ylab = "Precision")
 lines(pr_curve$curve[, 3], pr_curve$curve[, 1], col = "blue")
-legend("topright", 
-       legend = c(paste0("AUC (Training) = ", round(best_model$prc$auc, 2)), 
-                  paste0("AUC (Testing) = ", round(pr_curve$auc.integral, 2))), 
-       col = c("red", "blue"), 
-       lty = 1, 
-       bty = 'n')
+legend("topright",
+  legend = c(
+    paste0("AUC (Training) = ", round(best_class_data$best_model_overall$prc$auc, 2)),
+    paste0("AUC (Testing) = ", round(pr_curve$auc.integral, 2))
+  ),
+  col = c("red", "blue"),
+  lty = 1,
+  bty = "n"
+)
 
 # Reset plotting parameters and close PNG
 par(op)
@@ -489,16 +638,19 @@ print(paste("Best threshold based on ROC curve:", best_threshold))
 
 # Apply the best threshold for classification
 pred_best_threshold <- ifelse(positive_class_probs > best_threshold,
-                              "will_die_within_10_years",
-                              "will_die_within_5_years")
+  "will_die_within_10_years",
+  "will_die_within_5_years"
+)
 
 # Ensure the predicted classes are factors with the correct levels
-pred_best_threshold <- factor(pred_best_threshold, levels = levels(test$prognosis))
+pred_best_threshold <- factor(pred_best_threshold, levels = levels(best_class_data$test$prognosis))
 
 # Calculate accuracy on the test set with the best threshold
-pred_table <- table(pred_best_threshold, test$prognosis)
-dimnames(pred_table) <- list(c("will_die_within_10_years", "will_die_within_5_years"), 
-                             c("will_die_within_10_years", "will_die_within_5_years"))
+pred_table <- table(pred_best_threshold, best_class_data$test$prognosis)
+dimnames(pred_table) <- list(
+  c("will_die_within_10_years", "will_die_within_5_years"),
+  c("will_die_within_10_years", "will_die_within_5_years")
+)
 test_confusion <- confusionMatrix(pred_table)
 test_confusion
 

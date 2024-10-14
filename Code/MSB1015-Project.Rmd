@@ -7,6 +7,19 @@ output: html_document
 
 # 0. Setup
 ```{r setup, include=FALSE}
+# List of required packages
+required_packages <- c("rstudioapi", "readr", "dplyr", "ggplot2", "tidyr", 
+                       "stringr", "GGally", "mice", "isotree", "randomForest", 
+                       "caTools", "caret", "nestedcv", "mlbench", "pbapply", 
+                       "ROCR", "PRROC", "pROC", "gridExtra")
+
+# Check and install missing packages
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if (length(new_packages)) {
+  install.packages(new_packages)
+}
+
+# Load libraries
 library(rstudioapi)
 library(readr)
 library(dplyr)

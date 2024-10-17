@@ -543,9 +543,9 @@ png("precision_recall_plots_training.png", width = 1600, height = 800)
 # Plot precision and recall
 op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 2) + 0.1) # Set up the plotting layout
 plot(best_class_data$best_model_overall$roc, col = "red", main = "ROC Training", las = 1) # Plot ROC curve
-legend("bottomright", legend = paste0("AUC = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 3)), bty = "n") # Add AUC legend
+legend("bottomright", legend = paste0("AUC = ", signif(pROC::auc(best_class_data$best_model_overall$roc), 2)), bty = "n") # Add AUC legend
 plot(best_class_data$best_model_overall$prc, col = "red", main = "Precision-recall Training") # Plot Precision-Recall curve
-legend("topright", legend = paste0("AUC = ", round(best_class_data$best_model_overall$prc$auc, 3)), bty = "n") # Add AUC legend for PRC
+legend("topright", legend = paste0("AUC = ", round(best_class_data$best_model_overall$prc$auc, 2)), bty = "n") # Add AUC legend for PRC
 
 # Reset plotting parameters
 par(op)

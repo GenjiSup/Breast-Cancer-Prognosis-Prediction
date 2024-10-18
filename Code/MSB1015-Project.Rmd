@@ -65,7 +65,18 @@ missing_counts <- data %>%
 ggplot(missing_counts, aes(x = reorder(column, missing_count), y = missing_count)) +
   geom_bar(stat = "identity", fill = "royalblue") +
   coord_flip() +
-  labs(x = "Column", y = "Missing Count", title = "Columns with More Than 10 Missing Values")
+  labs(x = "Column", y = "Missing Count", title = "Columns with More Than 10 Missing Values") +
+  theme(
+    panel.background = element_rect(fill = "white", color = "white"),
+    plot.background = element_rect(fill = "white", color = "white"),
+    panel.grid.major = element_line(color = "gray80"),
+    panel.grid.minor = element_line(color = "gray90"),
+    axis.text.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12),  
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 15, face = "bold")
+  )
+
 
 # Convert specific columns to factors
 data$tumor_stage <- as.factor(data$tumor_stage)
@@ -283,6 +294,10 @@ random_forest <- function(data, ntree, nrun) {
 
   # Initialize an empty list to store models from repeated runs
   store_models_repeated <- vector("list", nrun)
+  
+  # Initialize lists to store all train and test splits
+  train_splits <- vector("list", nrun)
+  test_splits <- vector("list", nrun)
 
   # Loop to perform nested cross-validation nrun times
   for (repeat_run in 1:nrun) {
@@ -297,6 +312,10 @@ random_forest <- function(data, ntree, nrun) {
     # Subset the original data to create training and testing sets
     train <- data[trainIndex, ]
     test <- data[-trainIndex, ]
+    
+    # Store the train and test sets for this run
+    train_splits[[repeat_run]] <- train
+    test_splits[[repeat_run]] <- test
 
     # Ensure "prognosis" is a factor
     train$prognosis <- as.factor(train$prognosis)
@@ -406,7 +425,11 @@ random_forest <- function(data, ntree, nrun) {
   summary(best_model_overall)
 
   # Return the best model and the list of models for each repetition
-  return(list(best_model_overall = best_model_overall, store_models_repeated = store_models_repeated, train = train, test = test))
+  return(list(best_model_overall = best_model_overall, 
+              store_models_repeated = store_models_repeated, 
+              train_splits = train_splits, 
+              test_splits = test_splits
+              ))
 }
 ```
 
@@ -414,13 +437,13 @@ random_forest <- function(data, ntree, nrun) {
 # 2.2 Calling the random forest function
 ```{r perform random forest, echo=FALSE}
 # Categorical results
-results_categorical <- random_forest(categorical_data, ntree = 10, nrun = 2)
+results_categorical <- random_forest(categorical_data, ntree = 1000, nrun = 5)
 
 # Genetic results
-results_genetic <- random_forest(genetic_data, ntree = 10, nrun = 2)
+results_genetic <- random_forest(genetic_data, ntree = 10, nrun = 1)
 
 # Complete results
-results_complete <- random_forest(complete_data, ntree = 10, nrun = 2)
+results_complete <- random_forest(complete_data, ntree = 10, nrun = 1)
 ```
 
 
@@ -518,6 +541,60 @@ print(best_class_name)
 best_class_data <- get(best_class_name)
 ```
 
+# 3.3 Finding the matching splits for the best model
+```{r finding matching splits}
+# Get the AUC value of the best model
+best_auc <- best_class_data$best_model_overall$roc$auc
+
+# Initialize variables to store the matching run and model
+matching_run <- NULL
+matching_model <- NULL
+matching_index <- NULL
+
+# Loop over all runs in store_models_repeated
+for (run_index in seq_along(best_class_data$store_models_repeated)) {
+  # Get the current run's list of models
+  current_run_models <- best_class_data$store_models_repeated[[run_index]]
+  
+  # Loop over all models in the current run and compare their AUC values
+  for (model_index in seq_along(current_run_models)) {
+    model_name <- names(current_run_models)[model_index]
+    model_auc <- current_run_models[[model_name]]$roc$auc
+    
+    # Check if the AUC matches the best model's AUC
+    if (model_auc == best_auc) {
+      matching_run <- run_index
+      matching_model <- model_name
+      matching_index <- model_index
+      break
+    }
+  }
+  
+  # Break out of the outer loop if a match is found
+  if (!is.null(matching_run)) {
+    break
+  }
+}
+
+# If a match is found, print the run, model name, and retrieve the corresponding train/test splits
+if (!is.null(matching_run) && !is.null(matching_model)) {
+  print(paste("Matching model found in run:", matching_run, "model:", matching_model))
+
+  # Retrieve the corresponding train and test splits
+  matching_train_split <- best_class_data$train_splits[[matching_run]]
+  matching_test_split <- best_class_data$test_splits[[matching_run]]
+  
+  # Print or use the splits as needed
+  print("Found Matching Splits")
+  
+} else {
+  print("No matching model found")
+}
+
+
+```
+
+
 
 # 4. ROC and PR curves on the best model from the best class
 ```{r accuracy and plotting, echo=FALSE}
@@ -531,7 +608,7 @@ source("~/University/MSB/MSB1015/confusionPlot.R") # Load external plot function
 confusionPlot(train_confusion, title = "Confusion Matrix (Training Set)") # Plot confusion matrix
 
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
-pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$train, type = "prob") # Predict probabilities
+pred_probs <- predict(best_class_data$best_model_overall, newdata = matching_train_split, type = "prob") # Predict probabilities
 positive_class_probs <- pred_probs[, "will_die_within_10_years"] # Extract probabilities for "will_die_within_10_years"
 
 # Get the precision-recall values
@@ -597,16 +674,16 @@ ggplot(err_rate, aes(x = ntrees, y = OOB)) +
 # 5. Testing on the best model
 ```{r testing, echo=FALSE}
 # Get predicted probabilities for the positive class ("will_die_within_10_years")
-pred_probs <- predict(best_class_data$best_model_overall, newdata = best_class_data$test, type = "prob")
+pred_probs <- predict(best_class_data$best_model_overall, newdata = matching_test_split, type = "prob")
 positive_class_probs <- pred_probs[, "will_die_within_10_years"] # Select probabilities for "will_die_within_10_years"
 
 # Generate the ROC curve for the test set
-roc_curve <- roc(best_class_data$test$prognosis, positive_class_probs, levels = levels(best_class_data$test$prognosis), direction = ">")
+roc_curve <- roc(matching_test_split$prognosis, positive_class_probs, levels = levels(matching_test_split$prognosis), direction = ">")
 
 # Create Precision-Recall curve for the test set
 pr_curve <- pr.curve(
   scores.class0 = positive_class_probs, # Probabilities for the positive class
-  weights.class0 = as.numeric(best_class_data$test$prognosis == "will_die_within_10_years"), # Binary vector for positive class
+  weights.class0 = as.numeric(matching_test_split$prognosis == "will_die_within_10_years"), # Binary vector for positive class
   curve = TRUE # Return curve for plotting
 )
 
@@ -652,10 +729,10 @@ print(paste("Best threshold based on ROC curve:", best_threshold))
 pred_best_threshold <- ifelse(positive_class_probs > best_threshold, "will_die_within_10_years", "will_die_within_5_years") # Classify based on threshold
 
 # Ensure predicted classes have the correct factor levels
-pred_best_threshold <- factor(pred_best_threshold, levels = levels(best_class_data$test$prognosis))
+pred_best_threshold <- factor(pred_best_threshold, levels = levels(matching_test_split$prognosis))
 
 # Calculate accuracy on the test set using the best threshold
-pred_table <- table(pred_best_threshold, best_class_data$test$prognosis) # Create confusion matrix table
+pred_table <- table(pred_best_threshold, matching_test_split$prognosis) # Create confusion matrix table
 dimnames(pred_table) <- list( # Assign dimension names to match factor levels
   c("will_die_within_10_years", "will_die_within_5_years"),
   c("will_die_within_10_years", "will_die_within_5_years")

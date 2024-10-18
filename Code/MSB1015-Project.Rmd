@@ -45,8 +45,15 @@ library(gridExtra)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd()
 
+# Load the function for PCoA
+source("~/University/MSB/MSB1015/funPCoA.R") # Change the directory as needed
+
+# Load the confusion function
+source("~/University/MSB/MSB1015/confusionPlot.R") 
+
 # Load the data
 data <- read_csv("METABRIC_RNA_Mutation.csv")
+
 ```
 
 
@@ -54,6 +61,10 @@ data <- read_csv("METABRIC_RNA_Mutation.csv")
 ```{r cleaning, echo=FALSE}
 # Check for duplicates
 any(duplicated(data))
+
+# Call the function for the unsupervised random forest PCA
+PCoA_plots_rawdata <- PCoA_proximity_plot(data, "tumor_stage")
+grid.arrange(grobs = PCoA_plots_rawdata, ncol = 2)
 
 # Check for missing values
 missing_counts <- data %>%
@@ -102,25 +113,6 @@ data_filled <- data %>%
 # Check for missing values after cleaning
 sum(is.na(data_filled))
 
-# Select only the transcription data
-pca_gx <- data_filled %>%
-  select(brca1:ugt2b7)
-
-# Perform PCA to check the columns with the highest amount of missing values
-pca <- prcomp(pca_gx, center = TRUE, scale. = TRUE)
-
-# Convert PCA results to data frame
-pca_data <- as.data.frame(pca$x[, 1:3])
-pca_data$tumor_stage <- as.factor(data_filled$tumor_stage)
-
-# Create pairwise plots using ggpairs
-ggpairs(pca_data,
-  mapping = aes(color = tumor_stage),
-  upper = list(continuous = wrap("points")),
-  lower = list(continuous = wrap("points")),
-  diag = list(continuous = wrap("barDiag"))
-) +
-  theme_minimal()
 ```
 
 
@@ -153,6 +145,10 @@ write.csv(imputed_data, file = "imputed_data.csv", row.names = FALSE)
 ```{r plots after imputation, echo=FALSE}
 # Load the imputed data from the previous steps
 imputed_data <- read_csv("imputed_data.csv")
+
+# Call the function for the unsupervised random forest PCoA 
+PCoA_plots_rawdata <- PCoA_proximity_plot(data, "tumor_stage", n_trees = 10)
+grid.arrange(grobs = PCoA_plots_rawdata, ncol = 2)
 
 # Convert 'tumor_stage' to a factor in both datasets
 data$tumor_stage <- as.factor(data$tumor_stage)
@@ -247,12 +243,10 @@ categorical_data <- data_filtered %>%
   select(-death_from_cancer, -overall_survival, -overall_survival_months) %>% # Drop unnecessary columns
   as.data.frame() # Convert to a dataframe
 
-# Load the function for PCA
-source("~/University/MSB/MSB1015/funPCA.R") # Change the directory as needed
 
-# Call the function for the unsupervised random forest PCA
-pca_plots_categorical <- pca_proximity_plot(categorical_data, "prognosis")
-grid.arrange(grobs = pca_plots_categorical, ncol = 2)
+# Call the function for the unsupervised random forest PCoA
+PCoA_plots_categorical <- PCoA_proximity_plot(categorical_data, "prognosis")
+grid.arrange(grobs = PCoA_plots_categorical, ncol = 2)
 
 # Create the genetic dataframe
 genetic_data <- data_filtered %>%
@@ -265,9 +259,9 @@ genetic_data <- data_filtered %>%
   select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
   as.data.frame()
 
-# Call the function for the unsupervised random forest PCA (will take a few minutes)
-pca_plots_genetic <- pca_proximity_plot(genetic_data, "prognosis")
-grid.arrange(grobs = pca_plots_genetic, ncol = 2)
+# Call the function for the unsupervised random forest PCoA (will take a few minutes)
+PCoA_plots_genetic <- PCoA_proximity_plot(genetic_data, "prognosis")
+grid.arrange(grobs = PCoA_plots_genetic, ncol = 2)
 
 # Create the complete dataframe
 complete_data <- data_filtered %>%
@@ -279,9 +273,9 @@ complete_data <- data_filtered %>%
   select(-death_from_cancer, -overall_survival, -overall_survival_months) %>%
   as.data.frame()
 
-# Call the function for the unsupervised random forest PCA (will take a few minutes)
-pca_plots_complete <- pca_proximity_plot(complete_data, "prognosis")
-grid.arrange(grobs = pca_plots_complete, ncol = 2)
+# Call the function for the unsupervised random forest PCoA (will take a few minutes)
+PCoA_plots_complete <- PCoA_proximity_plot(complete_data, "prognosis")
+grid.arrange(grobs = PCoA_plots_complete, ncol = 2)
 ```
 
 
@@ -604,7 +598,6 @@ train_confusion <- confusionMatrix(pred_table_training) # Compute confusion matr
 train_confusion
 
 # Call the plotting function for the confusion matrix
-source("~/University/MSB/MSB1015/confusionPlot.R") # Load external plot function (update directory if needed)
 confusionPlot(train_confusion, title = "Confusion Matrix (Training Set)") # Plot confusion matrix
 
 # Get predicted probabilities for the positive class ("will_die_within_10_years")

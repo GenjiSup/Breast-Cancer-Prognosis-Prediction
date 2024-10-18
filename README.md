@@ -5,3 +5,5 @@ This repository contains the code developed for the MSB1015 project, which aims 
 
 Please ensure that the functions and datasets are kept in the same folder as the code. Note that the imputed data is provided in the data folder, as the imputation process requires significant time.
 
+More information on the data at: https://www.kaggle.com/datasets/raghadalharbi/breast-cancer-gene-expression-profiles-metabric/data
+

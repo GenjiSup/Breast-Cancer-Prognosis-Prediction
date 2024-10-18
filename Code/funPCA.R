@@ -1,4 +1,13 @@
-library(caret)
+# List of additional required packages
+additional_packages <- c("ggplot2", "RColorBrewer")
+
+# Check and install missing packages
+new_additional_packages <- additional_packages[!(additional_packages %in% installed.packages()[,"Package"])]
+if (length(new_additional_packages)) {
+  install.packages(new_additional_packages)
+}
+
+# Load the libraries
 library(ggplot2)
 library(RColorBrewer)
 

@@ -147,7 +147,7 @@ write.csv(imputed_data, file = "imputed_data.csv", row.names = FALSE)
 imputed_data <- read_csv("imputed_data.csv")
 
 # Call the function for the unsupervised random forest PCoA 
-PCoA_plots_rawdata <- PCoA_proximity_plot(data, "tumor_stage", n_trees = 10)
+PCoA_plots_rawdata <- PCoA_proximity_plot(data, "tumor_stage")
 grid.arrange(grobs = PCoA_plots_rawdata, ncol = 2)
 
 # Convert 'tumor_stage' to a factor in both datasets

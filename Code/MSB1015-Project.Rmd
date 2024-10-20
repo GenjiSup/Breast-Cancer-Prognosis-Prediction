@@ -45,7 +45,7 @@ library(gridExtra)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd()
 
-# Load the function for PCoA
+# Load the function for PCoA (will take some time on the large datasets)
 source("~/University/MSB/MSB1015/funPCoA.R") # Change the directory as needed
 
 # Load the confusion function
